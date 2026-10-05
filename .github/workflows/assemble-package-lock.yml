@@ -2,7 +2,10 @@ name: assemble-package-lock
 on:
   push:
     paths:
+      - "package.json"
+      - ".github/workflows/assemble-package-lock.yml"
       - "lock-parts/**"
+  workflow_dispatch:
 jobs:
   assemble:
     runs-on: ubuntu-latest
@@ -10,20 +13,27 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Assemble package-lock.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate package-lock.json
         run: |
           set -euo pipefail
-          count=$(ls lock-parts/part-*.b64 2>/dev/null | wc -l)
-          if [ "$count" -lt 8 ]; then
-            echo "Only $count/8 parts present; waiting for remaining parts"
-            exit 0
-          fi
-          cat lock-parts/part-*.b64 | base64 -d > package-lock.json
-          rm -rf lock-parts
-          rm -f .github/workflows/assemble-package-lock.yml
+          npm install --package-lock-only --ignore-scripts
+          test -f package-lock.json
+          wc -c package-lock.json
+      - name: Commit lockfile and cleanup
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf lock-parts || true
+          rm -f .github/workflows/assemble-package-lock.yml
           git add package-lock.json
           git add -u lock-parts .github/workflows/assemble-package-lock.yml || true
-          git commit -m "Assemble package-lock.json from parts" || exit 0
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git commit -m "Generate package-lock.json via npm"
           git push
